@@ -31,12 +31,16 @@ Takes 5 to 15 minutes depending on the connection. Needs hardware virtualization
 4. The relay console prints `LAN camera found: ...` when it sees the iPhone.
 5. In the emulator, Camera tab > left `⋮` > remote cameras icon > pick the iPhone.
 
-If the console shows the iPhone but the emulator list stays empty, start the relay with
-both service types mirrored:
+Relay modes (default works with an iPhone): the iPhone advertises the iOS service type, the
+Android app only browses the Android one, so the relay re-advertises iOS cameras under the
+Android type. `--both` advertises every camera under both types, `--raw` disables translation:
 
 ```
 powershell -ExecutionPolicy Bypass -File start-bmc-monitor.ps1 --both
 ```
+
+Records are diffed on both sides and removals are debounced for 20 s, so mDNS flaps and the
+relay heartbeat never re-announce a camera (a re-announce makes the app drop the connection).
 
 ## How it works
 

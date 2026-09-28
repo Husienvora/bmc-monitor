@@ -2,6 +2,9 @@
 // It listens on 127.0.0.1:5354 for JSON lines describing Blackmagic Camera
 // remote-camera services found on the real LAN, and re-advertises them via
 // mDNS inside the emulator so the Blackmagic Camera app can discover them.
+//
+// Records are diffed: an unchanged record is left alone (no goodbye/re-announce),
+// because a goodbye packet makes the app drop its connection to that camera.
 package main
 
 import (
@@ -11,6 +14,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/grandcat/zeroconf"
@@ -29,30 +34,64 @@ type Msg struct {
 	Services []Svc `json:"services"`
 }
 
+type entry struct {
+	sig string
+	srv *zeroconf.Server
+}
+
 var (
 	mu      sync.Mutex
-	servers []*zeroconf.Server
+	current = map[string]*entry{} // key: service|instance
 )
 
-func apply(m Msg) {
+func (s Svc) key() string { return s.Service + "|" + s.Instance }
+
+func (s Svc) sig() string {
+	ips := append([]string(nil), s.IPs...)
+	txt := append([]string(nil), s.TXT...)
+	sort.Strings(ips)
+	sort.Strings(txt)
+	return fmt.Sprintf("%s|%d|%s|%s", s.Host, s.Port, strings.Join(ips, ","), strings.Join(txt, ","))
+}
+
+func apply(m Msg) (added, changed, removed, kept int) {
 	mu.Lock()
 	defer mu.Unlock()
-	for _, s := range servers {
-		s.Shutdown()
-	}
-	servers = nil
+	want := map[string]Svc{}
 	for _, s := range m.Services {
+		want[s.key()] = s
+	}
+	// Drop records that vanished or changed.
+	for k, e := range current {
+		s, ok := want[k]
+		if ok && s.sig() == e.sig {
+			kept++
+			continue
+		}
+		e.srv.Shutdown()
+		delete(current, k)
+		if ok {
+			changed++
+		} else {
+			removed++
+			log.Printf("withdrawn %s", k)
+		}
+	}
+	// Register new / changed records.
+	for k, s := range want {
+		if _, ok := current[k]; ok {
+			continue
+		}
 		srv, err := zeroconf.RegisterProxy(s.Instance, s.Service, "local.", s.Port, s.Host, s.IPs, s.TXT, nil)
 		if err != nil {
 			log.Printf("register %q failed: %v", s.Instance, err)
 			continue
 		}
-		servers = append(servers, srv)
+		current[k] = &entry{sig: s.sig(), srv: srv}
+		added++
 		log.Printf("advertising %s (%s) -> %v:%d", s.Instance, s.Service, s.IPs, s.Port)
 	}
-	if len(m.Services) == 0 {
-		log.Printf("no services; cleared")
-	}
+	return
 }
 
 func main() {
@@ -80,8 +119,8 @@ func main() {
 					log.Printf("bad json: %v", err)
 					continue
 				}
-				apply(m)
-				fmt.Fprintln(c, "ok")
+				a, ch, r, k := apply(m)
+				fmt.Fprintf(c, "ok added=%d changed=%d removed=%d kept=%d\n", a+ch, ch, r, k)
 			}
 		}(c)
 	}
