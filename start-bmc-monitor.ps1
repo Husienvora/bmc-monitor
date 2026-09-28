@@ -12,7 +12,9 @@ function Emu-Running { (& $Adb devices 2>$null) -match "^emulator-\d+\s+device" 
 
 if (-not (Emu-Running)) {
     Write-Host "Starting emulator $Avd ..."
-    Start-Process -FilePath $Emu -ArgumentList @("-avd", $Avd, "-gpu", "host", "-no-boot-anim") -WindowStyle Normal
+    # Cold boot every time (-no-snapshot): quick-boot snapshots with GPU host mode
+    # can hang on load with a black screen after the window is closed.
+    Start-Process -FilePath $Emu -ArgumentList @("-avd", $Avd, "-gpu", "host", "-no-boot-anim", "-no-snapshot") -WindowStyle Normal
     $deadline = (Get-Date).AddMinutes(4)
     do {
         Start-Sleep -Seconds 3
