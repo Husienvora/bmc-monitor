@@ -1,0 +1,5 @@
+# Blackmagic Camera APK is downloaded by install.ps1, not redistributed here.
+apk/*
+!apk/.gitkeep
+*.log
+__pycache__/
